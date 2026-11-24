@@ -101,3 +101,58 @@ slower on a tiny job because starting the thread team costs more than the work.
 * **What does OpenMP actually benchmark?** The lab-side yield/quality
   integration per olive lot, not the process pipeline itself. See
   `docs/benchmark.md`.
+
+### Design choices ("be ready to convince us")
+
+* **Why pipes and not FIFOs?** Every process is a child of the supervisor, so
+  anonymous pipes created before `fork()` reach everyone who needs them. A FIFO
+  is a name in the filesystem: it is needed only for processes that are not
+  related. It has to be created and removed, and it is left behind if the
+  program crashes.
+* **Why pipes and not shared memory?** The data is a stream of messages, not
+  a table everyone edits. A pipe gives ordering, blocking and EOF for free.
+  Shared memory would need semaphores and would not tell a stage that
+  upstream has finished.
+* **Why one telemetry pipe for all seven children instead of seven?** Each
+  `MachineEvent` is smaller than `PIPE_BUF`, so every `write()` is atomic and
+  messages never mix. One pipe means one descriptor to poll. The machine id
+  inside the message says who sent it.
+* **Why does QC get its data from the supervisor?** Otherwise every machine
+  would need a second pipe to QC. The supervisor already receives everything,
+  so it forwards a copy. The feed is non blocking, so a slow QC can never
+  freeze the GUI; dropped samples are counted on screen.
+* **Why `poll()` and not `select()`?** `poll()` takes an array of descriptors
+  with no `FD_SETSIZE` limit, and it reports `POLLHUP` when all writers have
+  closed, which is how the supervisor knows a channel is finished.
+* **How does the line end by itself?** Reception closes its pipe after the
+  last batch. The next stage's `read()` returns 0 (EOF), so it closes its own
+  output and exits. The EOF travels down the line like a domino. This only
+  works because every unused pipe end is closed after `fork()`: one forgotten
+  write end and the reader would wait forever.
+* **How are zombies avoided?** `waitpid(-1, &status, WNOHANG)` runs on every
+  poll and collects any child that has exited. The status also shows *how* it
+  ended (normal exit vs killed by a signal), which is how a crash is told
+  apart from a normal finish.
+* **What does Ctrl-C do?** The terminal sends `SIGINT` to the whole process
+  group. The children ignore it; the supervisor's handler only sets a flag,
+  then shuts the children down in order with `SIGTERM`, waits for them, and
+  closes the window.
+* **Why is so little done inside signal handlers?** Only async-signal-safe
+  work is allowed there. Calling `printf` or `malloc` from a handler can
+  deadlock if the signal interrupts the same function. So handlers only set a
+  `volatile sig_atomic_t` flag, and the normal loop acts on it.
+* **Why `_exit()` in the child and not `exit()`?** `exit()` runs `atexit`
+  handlers and flushes stdio buffers copied from the parent, so the parent's
+  buffered output would be printed twice and freeglut's cleanup would run in
+  a process that never opened a window.
+* **Why a config file?** The spec asks for no hard coded values. Every range,
+  duration, temperature/pressure limit and the seed are read at start up, so
+  a new scenario (like `hot_day.cfg`) needs no recompiling. Unknown keys are
+  rejected so a typo is not silently ignored.
+* **Same input, same output?** Batches are generated from the seed and the
+  batch number, so two runs with the same config produce exactly the same
+  production figures. `make test` checks this.
+* **What if a pipe fills up?** Batches are about 60 bytes and a pipe holds
+  64 KB, so a slow stage can have about a thousand batches waiting before the
+  writer blocks. Blocking is the right behaviour then: it is backpressure, and
+  the upstream machine waits like a real conveyor would.

@@ -75,6 +75,23 @@ x        stop
 
 Results and what they mean: [docs/benchmark.md](docs/benchmark.md).
 
+## Debugging with gdb
+
+`make debug` rebuilds with `-O0 -g`. By default gdb stays in the parent
+after `fork()`. To step into a child:
+
+```
+gdb --args ./olive_press tests/fast.cfg --headless
+(gdb) set follow-fork-mode child      # follow the next fork into the child
+(gdb) set detach-on-fork off          # keep the other processes under gdb too
+(gdb) break crushing_run
+(gdb) run
+(gdb) info inferiors                  # list parent and children
+```
+
+An already running child can also be attached by its PID from the GUI:
+`gdb -p <pid>`.
+
 ## Tests
 
 ```sh

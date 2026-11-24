@@ -70,6 +70,35 @@ Tiny workload, `./omp_bench -n 2 -s 10 -r 101 --sweep -t 2`:
 | 1       | 0.000001       | 0.000002   | 0.88x   | match |
 | 2       | 0.000001       | 0.000002   | 0.73x   | match |
 
+### Where OpenMP starts to pay off
+
+2 threads, 200 RK4 steps per sample, growing number of samples
+(`./omp_bench -n N -s 200 -t 2`):
+
+| samples | sequential [s] | OpenMP [s] | speedup |
+|--------:|---------------:|-----------:|--------:|
+| 1       | 0.000013       | 0.000014   | 0.95x   |
+| 2       | 0.000027       | 0.000014   | 1.86x   |
+| 16      | 0.000213       | 0.000109   | 1.96x   |
+| 256     | 0.003491       | 0.001751   | 1.99x   |
+| 4096    | 0.055785       | 0.027952   | 2.00x   |
+
+2 samples, growing work per sample (`./omp_bench -n 2 -s S -t 2`):
+
+| steps | sequential [s] | OpenMP [s] | speedup |
+|------:|---------------:|-----------:|--------:|
+| 1     | < 0.000001     | 0.000001   | 0.22x   |
+| 10    | 0.000001       | 0.000002   | 0.79x   |
+| 20    | 0.000003       | 0.000002   | 1.17x   |
+| 80    | 0.000011       | 0.000006   | 1.68x   |
+| 200   | 0.000027       | 0.000014   | 1.85x   |
+
+The break-even point is around **1.5 microseconds of total work**. Below
+that, the fork/join of the thread team (about a microsecond with warm
+threads) costs more than the loop itself. Above it, the speedup climbs
+quickly toward the core count. With a single sample there is nothing to
+split, so the speedup stays at 1x however much work that sample has.
+
 ## Reading the numbers
 
 * With 2 cores, 2 threads gives 1.92x, close to the ideal 2x. The work is
@@ -80,7 +109,7 @@ Tiny workload, `./omp_bench -n 2 -s 10 -r 101 --sweep -t 2`:
 * 1 thread under OpenMP is about the same as plain sequential. The few
   percent either way is noise plus the outlined loop being optimised a bit
   differently.
-* On a tiny job OpenMP is **slower** (0.73x). Waking the thread team and
+* On a tiny job OpenMP is **slower** (0.73x, and 0.22x on the smallest). Waking the thread team and
   joining it costs a few microseconds, more than the work itself. This is the
   "check if you get better or worse results" part of the spec: OpenMP pays
   off only when each thread gets enough work to cover that fixed cost.
