@@ -1,0 +1,6 @@
+build/
+olive_press
+omp_bench
+*.o
+*.d
+*.log
